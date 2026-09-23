@@ -35,7 +35,7 @@ async function restoreAuthFromCloud() {
             fs.mkdirSync(authFolder, { recursive: true });
         }
         
-        // If local auth folder already has creds.json, skip download
+        // If local auth folder already has creds.json with valid keys, skip download
         if (fs.existsSync(path.join(authFolder, 'creds.json'))) {
             return;
         }
@@ -101,7 +101,9 @@ async function connectToWhatsApp() {
 
         sock.ev.on('creds.update', async () => {
             await saveCreds();
-            syncAuthToCloud();
+            if (isConnected) {
+                syncAuthToCloud();
+            }
         });
 
         sock.ev.on('connection.update', async (update) => {
@@ -304,10 +306,16 @@ async function handlePairCode(req, res) {
         return res.json({ success: true, connected: true, message: 'WhatsApp is already connected.' });
     }
     try {
+        // Clean any stale un-paired auth files before creating new pairing request
+        if (fs.existsSync(authFolder) && !fs.existsSync(path.join(authFolder, 'creds.json'))) {
+            try { fs.rmSync(authFolder, { recursive: true, force: true }); } catch(e){}
+        }
+
         if (!sock) {
             await connectToWhatsApp();
             await new Promise(r => setTimeout(r, 2500));
         }
+
         let cleanPhone = String(bodyPhone).replace(/[^0-9]/g, '');
         if (cleanPhone.startsWith('01')) {
             cleanPhone = '880' + cleanPhone.substring(1);
