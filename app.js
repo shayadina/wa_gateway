@@ -12,6 +12,15 @@ const {
     Browsers
 } = require('@whiskeysockets/baileys');
 
+// Prevent process crashes on socket unexpected errors
+process.on('uncaughtException', (err) => {
+    console.error('Uncaught Exception:', err.message);
+});
+
+process.on('unhandledRejection', (reason) => {
+    console.error('Unhandled Rejection:', reason);
+});
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -309,32 +318,30 @@ async function handleSendMessage(req, res) {
 // ── POST /pair-code ──────────────────────────────────────────────────────────
 app.all('/pair-code', handlePairCode);
 async function handlePairCode(req, res) {
-    const body = req.body || {};
-    const bodyPhone = body.phoneNumber || body.phone || req.query.phoneNumber || req.query.phone;
-    if (!bodyPhone) {
-        return res.status(400).json({ success: false, message: 'Phone number is required.' });
-    }
-    if (isConnected) {
-        return res.json({ success: true, connected: true, message: 'WhatsApp is already connected.' });
-    }
     try {
-        // Clean any stale un-paired auth files before creating new pairing request
-        if (fs.existsSync(authFolder) && !fs.existsSync(path.join(authFolder, 'creds.json'))) {
-            try { fs.rmSync(authFolder, { recursive: true, force: true }); } catch(e){}
+        const body = req.body || {};
+        const bodyPhone = body.phoneNumber || body.phone || req.query.phoneNumber || req.query.phone;
+        if (!bodyPhone) {
+            return res.status(400).json({ success: false, message: 'Phone number is required.' });
         }
-
-        if (!sock) {
-            await connectToWhatsApp();
-            await new Promise(r => setTimeout(r, 2500));
+        if (isConnected) {
+            return res.json({ success: true, connected: true, message: 'WhatsApp is already connected.' });
         }
 
         let cleanPhone = String(bodyPhone).replace(/[^0-9]/g, '');
         if (cleanPhone.startsWith('01')) {
             cleanPhone = '880' + cleanPhone.substring(1);
         }
-        if (cleanPhone.length < 8) {
-            return res.status(400).json({ success: false, message: 'Invalid phone number format.' });
+
+        if (!sock) {
+            await connectToWhatsApp();
+            await new Promise(r => setTimeout(r, 2000));
         }
+
+        if (!sock) {
+            return res.status(500).json({ success: false, error: 'Could not initialize WhatsApp socket.' });
+        }
+
         const code = await sock.requestPairingCode(cleanPhone);
         const formattedCode = code ? code.match(/.{1,4}/g)?.join('-') : code;
         return res.json({
@@ -343,7 +350,7 @@ async function handlePairCode(req, res) {
             message: 'Pairing code generated!'
         });
     } catch (err) {
-        console.error('Error requesting pairing code:', err);
+        console.error('Error in handlePairCode:', err.message);
         return res.status(500).json({ success: false, error: err.message || 'Failed to generate pairing code.' });
     }
 }
