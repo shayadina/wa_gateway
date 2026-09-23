@@ -217,7 +217,8 @@ async function handleSendMessage(req, res) {
 // ── POST /pair-code ──────────────────────────────────────────────────────────
 app.all('/pair-code', handlePairCode);
 async function handlePairCode(req, res) {
-    const bodyPhone = (req.body && req.body.phoneNumber) ? req.body.phoneNumber : req.query.phoneNumber;
+    const body = req.body || {};
+    const bodyPhone = body.phoneNumber || body.phone || req.query.phoneNumber || req.query.phone;
     if (!bodyPhone) {
         return res.status(400).json({ success: false, message: 'Phone number is required.' });
     }
@@ -227,7 +228,7 @@ async function handlePairCode(req, res) {
     try {
         if (!sock) {
             await connectToWhatsApp();
-            await new Promise(r => setTimeout(r, 2000));
+            await new Promise(r => setTimeout(r, 2500));
         }
         let cleanPhone = String(bodyPhone).replace(/[^0-9]/g, '');
         if (cleanPhone.startsWith('01')) {
