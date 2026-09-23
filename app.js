@@ -200,6 +200,18 @@ async function handleQr(req, res) {
         if (isConnected) {
             return res.json({ success: true, connected: true, message: 'Already connected to WhatsApp.' });
         }
+        
+        if (!currentQr) {
+            if (!sock) {
+                connectToWhatsApp();
+            }
+            // Poll for generated QR for up to 3 seconds
+            for (let i = 0; i < 6; i++) {
+                if (currentQr) break;
+                await new Promise(r => setTimeout(r, 500));
+            }
+        }
+
         if (!currentQr) {
             return res.json({ success: false, connected: false, message: 'QR Code is generating, please refresh in 3 seconds...' });
         }
