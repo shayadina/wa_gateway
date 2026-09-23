@@ -104,6 +104,7 @@ function getRouteAction(req) {
     if (p.endsWith('qr')) return 'qr';
     if (p.endsWith('groups')) return 'groups';
     if (p.endsWith('send-group-message')) return 'send-group-message';
+    if (p.endsWith('pair-code')) return 'pair-code';
     if (p.endsWith('logout')) return 'logout';
     return 'status';
 }
