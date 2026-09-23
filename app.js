@@ -16,8 +16,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 let sock = null;
 let currentQr = null;
@@ -25,8 +25,65 @@ let isConnected = false;
 let connectedUser = null;
 const authFolder = path.join(__dirname, 'auth_info_baileys');
 
+const ERP_SYNC_URL = process.env.ERP_SYNC_URL || 'https://erp.sunonbd.com/supershops/wa_proxy.php';
+const SECRET_KEY = 'SunonERP_WA_Secret_2026_SecureKey';
+
+// Restore auth state from ERP MySQL Database on startup
+async function restoreAuthFromCloud() {
+    try {
+        if (!fs.existsSync(authFolder)) {
+            fs.mkdirSync(authFolder, { recursive: true });
+        }
+        
+        // If local auth folder already has creds.json, skip download
+        if (fs.existsSync(path.join(authFolder, 'creds.json'))) {
+            return;
+        }
+
+        console.log('Fetching session credentials from ERP database...');
+        const res = await fetch(`${ERP_SYNC_URL}?action=load-auth&secret=${SECRET_KEY}`);
+        const data = await res.json();
+        
+        if (data && data.authData) {
+            const filesMap = JSON.parse(data.authData);
+            for (const [filename, content] of Object.entries(filesMap)) {
+                fs.writeFileSync(path.join(authFolder, filename), content, 'utf-8');
+            }
+            console.log('✅ Restored session files from cloud database!');
+        }
+    } catch (e) {
+        console.error('Error restoring session from cloud database:', e.message);
+    }
+}
+
+// Persist auth state back to ERP MySQL Database
+async function syncAuthToCloud() {
+    try {
+        if (!fs.existsSync(authFolder)) return;
+        const files = fs.readdirSync(authFolder);
+        if (files.length === 0) return;
+
+        const filesMap = {};
+        for (const file of files) {
+            const filePath = path.join(authFolder, file);
+            if (fs.statSync(filePath).isFile()) {
+                filesMap[file] = fs.readFileSync(filePath, 'utf-8');
+            }
+        }
+
+        await fetch(`${ERP_SYNC_URL}?action=save-auth&secret=${SECRET_KEY}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(filesMap)
+        });
+        console.log('☁️ Session synced to ERP database.');
+    } catch (e) {}
+}
+
 async function connectToWhatsApp() {
     try {
+        await restoreAuthFromCloud();
+
         const { state, saveCreds } = await useMultiFileAuthState(authFolder);
         const { version } = await fetchLatestBaileysVersion();
 
@@ -42,7 +99,10 @@ async function connectToWhatsApp() {
             syncFullHistory: false
         });
 
-        sock.ev.on('creds.update', saveCreds);
+        sock.ev.on('creds.update', async () => {
+            await saveCreds();
+            syncAuthToCloud();
+        });
 
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
@@ -59,6 +119,7 @@ async function connectToWhatsApp() {
                 currentQr = null;
                 connectedUser = sock.user ? (sock.user.id || sock.user.name) : 'Connected User';
                 console.log('✅ WhatsApp Gateway connected successfully as:', connectedUser);
+                syncAuthToCloud();
             }
 
             if (connection === 'close') {
@@ -73,6 +134,7 @@ async function connectToWhatsApp() {
                     console.log('User unlinked account from phone. Cleaning auth credentials...');
                     try {
                         fs.rmSync(authFolder, { recursive: true, force: true });
+                        fetch(`${ERP_SYNC_URL}?action=clear-auth&secret=${SECRET_KEY}`).catch(() => {});
                     } catch (e) {}
                     currentQr = null;
                     sock = null;
@@ -156,12 +218,13 @@ async function handleGroups(req, res) {
         const chats = await sock.groupFetchAllParticipating();
         const groups = Object.values(chats).map(g => ({
             id: g.id,
-            subject: g.subject,
+            subject: g.subject || 'WhatsApp Group',
             participantsCount: g.participants ? g.participants.length : 0
         }));
         return res.json({ success: true, count: groups.length, groups });
     } catch (err) {
-        return res.status(500).json({ success: false, error: err.message });
+        console.error('Error fetching groups:', err);
+        return res.status(500).json({ success: false, error: err.message || 'Could not fetch groups' });
     }
 }
 
