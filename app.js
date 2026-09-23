@@ -201,10 +201,20 @@ async function handleSendMessage(req, res) {
     }
 
     try {
-        // Send message with 12s Promise timeout to avoid hanging cURL
+        // Pre-fetch group metadata if target is a group JID (@g.us) to hydrate participant encryption keys
+        if (targetJid.endsWith('@g.us')) {
+            try {
+                await Promise.race([
+                    sock.groupMetadata(targetJid),
+                    new Promise(r => setTimeout(r, 4000))
+                ]);
+            } catch(e) {}
+        }
+
+        // Send message with 25s Promise timeout
         const sendPromise = sock.sendMessage(targetJid, { text });
         const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('WhatsApp socket timed out sending message. Ensure recipient is valid.')), 12000)
+            setTimeout(() => reject(new Error('WhatsApp socket timed out sending message. Ensure recipient is valid.')), 25000)
         );
 
         const sentMsg = await Promise.race([sendPromise, timeoutPromise]);
