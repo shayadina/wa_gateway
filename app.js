@@ -25,7 +25,16 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+
+// Safe JSON Body Parser middleware (bypasses empty/invalid JSON body errors)
+app.use((req, res, next) => {
+    express.json({ limit: '10mb' })(req, res, (err) => {
+        if (err) {
+            req.body = {};
+        }
+        next();
+    });
+});
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 let sock = null;
